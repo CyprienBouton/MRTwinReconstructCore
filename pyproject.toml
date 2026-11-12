@@ -3,18 +3,19 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mrzero-reconstruct-core"
+name = "mrtwin-reconstruct-core"
 version = "0.1.0"
-description = "Standalone MRzero reconstruction core with GRAPPA, BART bindings, and reconstruction logic."
+description = "Standalone MRtwin reconstruction core with GRAPPA, BART bindings, and reconstruction logic."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "numpy",
     "torch",
     "SimpleITK",
-    "mrzerocore",
     "typing",
+    "gt-twixtools",
+    "scipy==1.13.1"
 ]
 
 [tool.setuptools.packages.find]
-include = ["MRzeroReconstructCoreLib*"]
+include = ["MRTwinReconstructCoreLib*"]

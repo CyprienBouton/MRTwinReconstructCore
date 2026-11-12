@@ -1,6 +1,6 @@
-# MRzero Reconstruction Core
+# MRTwin Reconstruction Core
 
-Standalone Python reconstruction core for MRzero MRI reconstruction, with support for GRAPPA, BART-related utilities, and integration with 3D Slicer.
+Standalone Python reconstruction core for MRTwin MRI reconstruction, with support for GRAPPA, BART-related utilities, and integration with 3D Slicer.
 
 ## Overview
 
@@ -8,10 +8,10 @@ This project separates reconstruction algorithms from the 3D Slicer interface, m
 
 ### Main components
 
-- `RecoMRzero.py`: Main reconstruction implementation.
+- `RecoMRTwin.py`: Main reconstruction implementation.
 - `ggrappa/`: GRAPPA-related reconstruction utilities.
 - `bart_python/`: Python utilities for BART integration.
-- `MRzeroReconstructLogic.py`: 3D Slicer module logic that connects the reconstruction core to Slicer.
+- `MRTwinReconstructLogic.py`: 3D Slicer module logic that connects the reconstruction core to Slicer.
 
 ## Project structure
 
@@ -19,12 +19,12 @@ This project separates reconstruction algorithms from the 3D Slicer interface, m
 project/
 ├── README.md
 ├── pyproject.toml
-├── MRzeroReconstructCoreLib/
+├── MRTwinReconstructCoreLib/
 │   ├── __init__.py
-│   ├── RecoMRzero.py
+│   ├── RecoMRTwin.py
 │   ├── bart_python/
 │   └── ggrappa/
-└── MRzeroReconstructCore.py
+└── MRTwinReconstructCore.py
 ```
 
 Adapt this structure to match the actual repository layout.
@@ -53,7 +53,7 @@ This installs the package in editable mode, allowing source code changes to be u
 ### Verify the installation
 
 ```bash
-python -c "import MRzeroReconstructCore; print(MRzeroReconstructCore.__file__)"
+python -c "import MRTwinReconstructCore; print(MRTwinReconstructCore.__file__)"
 ```
 
 ### Configure BART
@@ -69,14 +69,14 @@ Installing this package does not automatically install the external BART toolbox
 ### Import the reconstruction core
 
 ```python
-from MRzeroReconstructCore import MRzeroReconstructLogic
+from MRTwinReconstructCore import MRTwinReconstructLogic
 ```
 
 ### Integration with 3D Slicer
 
 The Slicer module logic can import the standalone reconstruction core:
 
-Keep reconstruction algorithms and supporting utilities in `MRzeroReconstructCore`, and Slicer-specific operations in the Slicer module.
+Keep reconstruction algorithms and supporting utilities in `MRTwinReconstructCore`, and Slicer-specific operations in the Slicer module.
 
 Ensure that the core package and its dependencies are accessible from Slicer's Python environment. Installing the package in your system Python environment does not necessarily make it available in Slicer.
 
