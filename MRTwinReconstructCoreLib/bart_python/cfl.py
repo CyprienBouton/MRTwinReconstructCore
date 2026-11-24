@@ -1,3 +1,8 @@
+# Vendored from the BART Python bindings (python/bart.py, cfl.py, wslsupport.py of
+# https://github.com/mrirecon/bart). BSD 3-Clause licence; see LICENSE in this
+# directory and the copyright header of each file. Local changes: bart.py renamed
+# to bart_python.py, package-relative imports, WSL path conversion helpers.
+#
 # Copyright 2013-2015. The Regents of the University of California.
 # Copyright 2021. Uecker Lab. University Center Göttingen.
 # Copyright 2024. Institute for Biomedical Imaging. TU Graz.

@@ -1,3 +1,8 @@
+# Vendored from the BART Python bindings (python/bart.py, cfl.py, wslsupport.py of
+# https://github.com/mrirecon/bart). BSD 3-Clause licence; see LICENSE in this
+# directory and the copyright header of each file. Local changes: bart.py renamed
+# to bart_python.py, package-relative imports, WSL path conversion helpers.
+#
 # Copyright 2016. The Regents of the University of California.
 # All rights reserved. Use of this source code is governed by 
 # a BSD-style license which can be found in the LICENSE file.

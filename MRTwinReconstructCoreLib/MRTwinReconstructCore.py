@@ -1,114 +1,49 @@
+"""High-level reconstruction entry point for Siemens twix raw data.
 
-import numpy as np
-import torch
+:class:`MRTwinReconstructLogic` is the API used by the 3D Slicer extension
+``MRTwixReconstruct`` (module ``MRTwinReconstruct``). It reads a Siemens
+``.dat`` file, reconstructs it and returns SimpleITK images ready to be
+loaded in Slicer.
+"""
+
+from typing import Optional, Sequence
+
 import SimpleITK as sitk
+import torch
 
+from . import reco_utils
 from .RecoMRTwin import RecoMRTwin
+
+#: Reconstruction methods accepted by ``runReconstruction`` (case-insensitive).
+METHODS = ("FFT", "POCS", "GRAPPA")
 
 
 class MRTwinReconstructLogic:
+    """Reconstruct Siemens twix raw data into SimpleITK volumes."""
 
     # ================================================================
-    # KSPACE -> SLICER
-    # ================================================================
-
-    @staticmethod
-    def kspace_to_sitk(kspace):
-
-        magnitude = torch.sqrt(
-            torch.sum(
-                torch.abs(kspace) ** 2,
-                dim=-1
-            )
-        )
-
-        display = torch.log1p(magnitude)
-
-        display = display - display.min()
-
-        maximum = display.max()
-
-        if maximum > 0:
-            display = display / maximum
-
-        volume = display.permute(2, 1, 0).float()
-
-        return MRTwinReconstructLogic.make_sitk_image(volume)
-
-    # ================================================================
-    # IMAGE -> SLICER
+    # HELPERS (kept as static methods for backward compatibility)
     # ================================================================
 
     @staticmethod
-    def make_sitk_image(volume, spacing=(1.0, 1.0, 1.0)):
-
-        data = (
-            volume
-            .detach()
-            .cpu()
-            .numpy()
-            .astype(np.float32)
-        )
-
-        image = sitk.GetImageFromArray(data)
-
-        image.SetSpacing(spacing)
-
-        image.SetDirection(
-            (
-                1.0, 0.0, 0.0,
-                0.0, 1.0, 0.0,
-                0.0, 0.0, 1.0
-            )
-        )
-
-        return image
-
-    # ================================================================
-    # CENTERING
-    # ================================================================
+    def kspace_to_sitk(kspace: torch.Tensor) -> sitk.Image:
+        """Multi-coil k-space -> log-compressed RSS display volume (unit spacing)."""
+        return reco_utils.kspace_to_sitk(kspace, center_volume=False)
 
     @staticmethod
-    def center_reconstruction_kspace(kspace, center):
+    def center_origin(sitk_img: sitk.Image) -> sitk.Image:
+        """Put physical (0, 0, 0) at the centre of the volume."""
+        return reco_utils.center_origin(sitk_img)
 
-        """
-        Zero-pad a separate reconstruction copy of k-space.
-
-        Input:
-            kspace: torch.Tensor [Col, Lin, Par, Coils]
-            center: Twix center (Col, Lin, Par)
-
-        Returns:
-            centered_kspace
-            updated_center
-
-        The input tensor is never modified.
-        """
-
-        padding, target_center = RecoMRTwin.get_centering_geometry(
-            kspace.shape,
-            center
-        )
-
-        kspace_np = (
-            kspace
-            .detach()
-            .cpu()
-            .numpy()
-        )
-
-        centered_np = np.pad(
-            kspace_np,
-            pad_width=padding,
-            mode="constant",
-            constant_values=0
-        )
-
-        centered_kspace = torch.from_numpy(
-            np.ascontiguousarray(centered_np)
-        )
-
-        return centered_kspace, target_center
+    @staticmethod
+    def make_sitk_image(volume: torch.Tensor,
+                        spacing: Sequence[float] = (1.0, 1.0, 1.0),
+                        origin: Sequence[float] = (0.0, 0.0, 0.0),
+                        direction: Sequence[float] = reco_utils.IDENTITY_DIRECTION,
+                        center_volume: bool = False) -> sitk.Image:
+        """Real ``[z, y, x]`` tensor -> float32 SimpleITK image."""
+        return reco_utils.make_sitk_image(volume, spacing=spacing, origin=origin,
+                                          direction=direction, center_volume=center_volume)
 
     # ================================================================
     # MAIN RECONSTRUCTION
@@ -116,190 +51,115 @@ class MRTwinReconstructLogic:
 
     def runReconstruction(
         self,
-        twixPath,
-        method="FFT",
-        apply_centering=True,
-        pocs_iterations=30,
-        pocs_device="cpu"
+        twixPath: str,
+        method: str = "FFT",
+        apply_centering: bool = True,
+        pocs_iterations: int = 30,
+        pocs_device: str = "cpu",
+        pocs_dim: int = 0,
+        kernelSize: Sequence[int] = (4, 1, 5),
+        reg: float = 1e-4,
+        af: Optional[Sequence[int]] = None,
     ):
+        """Reconstruct one twix file.
 
-        method = method.upper()
+        Args:
+            twixPath: Siemens ``.dat`` file.
+            method: ``"FFT"``, ``"POCS"`` or ``"GRAPPA"`` (case-insensitive).
+            apply_centering: zero-pad k-space so that the scanner-reported
+                centre is at index ``n // 2`` before the FFT (recommended for
+                partial Fourier / asymmetric echo).
+            pocs_iterations: POCS: number of iterations.
+            pocs_device: POCS: torch device (``"cpu"`` or ``"cuda"``).
+            pocs_dim: POCS: partial-Fourier axis (0 = Col / asymmetric echo,
+                1 = Lin, 2 = Par).
+            kernelSize: GRAPPA kernel ``(ky, kz, kx)``.
+            reg: GRAPPA Tikhonov regularisation.
+            af: GRAPPA acceleration ``(af_y, af_z)``; ``None`` = estimated
+                from the sampling pattern.
+
+        Returns:
+            ``(image_sitk, reconstruction_kspace_sitk, raw_kspace_sitk)``:
+            the magnitude image (RSS over coils, unit spacing, Lin axis
+            flipped), the k-space used for that image and the raw k-space,
+            both as log-magnitude display volumes.
+        """
+        method_key = method.strip().upper()
+        if method_key not in METHODS:
+            raise ValueError(
+                f"Unknown reconstruction method: {method}. "
+                f"Available methods: {', '.join(METHODS)}."
+            )
 
         reco = RecoMRTwin(twixPath)
 
-        # ------------------------------------------------------------
-        # Load original k-space
-        # ------------------------------------------------------------
-
-        raw_kspace = reco.get_kspace(
-            apply_centering=False
-        )
-
-        # Keep raw k-space unchanged.
-        raw_kspace_sitk = self.kspace_to_sitk(
-            raw_kspace
-        )
-
-        # Work on a separate reconstruction copy.
-        reconstruction_kspace = raw_kspace.clone()
-
-        # ------------------------------------------------------------
-        # Optional zero-padding centering
-        # ------------------------------------------------------------
+        raw_kspace = reco.get_kspace(apply_centering=False)
+        raw_kspace_sitk = self.kspace_to_sitk(raw_kspace)
 
         if apply_centering:
-
-            reconstruction_kspace, target_center = (
-                self.center_reconstruction_kspace(
-                    reconstruction_kspace,
-                    reco.twix_center
-                )
-            )
-
-            reco.kspace_center = target_center
-
+            reconstruction_kspace, reco.kspace_center = reco.center_kspace(raw_kspace)
         else:
-
+            reconstruction_kspace = raw_kspace.clone()
             reco.kspace_center = reco.twix_center
 
         # ------------------------------------------------------------
         # Reconstruction
         # ------------------------------------------------------------
-
-        if method == "FFT":
-
-            reconstruction_kspace = reco.prepare_kspace(
-                reconstruction_kspace
-            )
-
-            output = reco.fft_reconstruct(
-                reconstruction_kspace
-            )
-
-        elif method == "POCS":
-
+        if method_key == "POCS":
             reconstruction_kspace = reco.pocs_partial_fourier(
                 reconstruction_kspace,
                 dim_enc=(0, 1, 2),
-                dim_pf=0,
+                dim_pf=pocs_dim,
                 number_of_iterations=pocs_iterations,
-                center_index=int(reco.kspace_center[0]),
-                device=pocs_device
+                center_index=int(reco.kspace_center[pocs_dim]),
+                device=pocs_device,
             )
 
-            output = reco.fft_reconstruct(
-                reconstruction_kspace
+        elif method_key == "GRAPPA":
+            refscan = reco.get_refscan_kspace(raw_kspace.shape)
+            if refscan is None:
+                acs_source = reconstruction_kspace          # integrated ACS lines
+            elif apply_centering:
+                acs_source, _ = reco.center_kspace(refscan)  # same padding as the image
+            else:
+                acs_source = refscan
+            acs = reco.get_acs_from_kspace(acs_source, reco.kspace_center)
+            reconstruction_kspace = reco.grappa_reconstruct(
+                reconstruction_kspace, acs, af=af, kernel_size=kernelSize, reg=reg
             )
 
-        elif method == "GRAPPA":
-
-            reconstruction_kspace = reco.prepare_kspace(
-                reconstruction_kspace
-            )
-
-            acs = reco.get_acs_from_kspace(
-                reconstruction_kspace
-            )
-
-            output = reco.grappa_reconstruct(
-                reconstruction_kspace,
-                acs
-            )
-
-        else:
-
-            raise ValueError(
-                f"Unknown reconstruction method: {method}. "
-                "Available methods: FFT, POCS, GRAPPA."
-            )
+        output = reco.fft_reconstruct(reconstruction_kspace)
 
         # ------------------------------------------------------------
-        # Coil combination
+        # Coil combination and conversion
         # ------------------------------------------------------------
+        magnitude = reco_utils.rss(output, dim=-1)
+        volume = torch.flip(magnitude.permute(2, 1, 0), dims=(1,))
+        image_sitk = self.make_sitk_image(volume, spacing=reco.get_spacing(magnitude.shape))
+        reconstruction_kspace_sitk = self.kspace_to_sitk(reconstruction_kspace)
 
-        if output.dim() == 4:
-
-            magnitude = output.abs().mean(dim=-1)
-
-        elif output.dim() == 3:
-
-            magnitude = output.abs()
-
-        else:
-
-            raise ValueError(
-                f"Unexpected reconstruction shape: {output.shape}"
-            )
-
-        # ------------------------------------------------------------
-        # Convert reconstructed image to SimpleITK
-        # ------------------------------------------------------------
-
-        volume = magnitude.permute(2, 1, 0)
-
-        volume = torch.flip(
-            volume,
-            dims=(1,)
-        )
-
-        image_sitk = self.make_sitk_image(
-            volume,
-            spacing=reco.get_spacing()
-        )
-
-        # ------------------------------------------------------------
-        # Convert reconstructed k-space to SimpleITK
-        # ------------------------------------------------------------
-
-        reconstruction_kspace_sitk = self.kspace_to_sitk(
-            reconstruction_kspace
-        )
-
-        return (
-            image_sitk,
-            reconstruction_kspace_sitk,
-            raw_kspace_sitk
-        )
+        return image_sitk, reconstruction_kspace_sitk, raw_kspace_sitk
 
     # ================================================================
     # MULTIPLE-FILE RECONSTRUCTION
     # ================================================================
 
-    def runMultipleReconstructions(
-        self,
-        twixPaths,
-        method="FFT",
-        apply_centering=True,
-        pocs_iterations=10,
-        pocs_device="cpu"
-    ):
+    def runMultipleReconstructions(self, twixPaths, method="FFT", **kwargs):
+        """Run :meth:`runReconstruction` on several files.
 
+        Extra keyword arguments are forwarded to :meth:`runReconstruction`.
+        Errors are caught per file.
+
+        Returns:
+            list of ``{"filename", "result", "error"}`` dicts, where ``result``
+            is the tuple returned by :meth:`runReconstruction` (or None) and
+            ``error`` the error message (or None).
+        """
         results = []
-
         for twixPath in twixPaths:
-
             try:
-
-                result = self.runReconstruction(
-                    twixPath,
-                    method=method,
-                    apply_centering=apply_centering,
-                    pocs_iterations=pocs_iterations,
-                    pocs_device=pocs_device
-                )
-
-                results.append({
-                    "filename": twixPath,
-                    "result": result,
-                    "error": None
-                })
-
-            except Exception as exc:
-
-                results.append({
-                    "filename": twixPath,
-                    "result": None,
-                    "error": str(exc)
-                })
-
+                result = self.runReconstruction(twixPath, method, **kwargs)
+                results.append({"filename": twixPath, "result": result, "error": None})
+            except Exception as exc:  # keep going with the other files
+                results.append({"filename": twixPath, "result": None, "error": str(exc)})
         return results

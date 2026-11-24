@@ -4,18 +4,38 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mrtwin-reconstruct-core"
-version = "0.1.0"
-description = "Standalone MRtwin reconstruction core with GRAPPA, BART bindings, and reconstruction logic."
+dynamic = ["version"]
+description = "Reconstruction core for Siemens twix raw MRI data (FFT, POCS partial Fourier, GRAPPA), used by the 3D Slicer extension MRTwixReconstruct."
 readme = "README.md"
+# 3D Slicer 5.8 ships Python 3.9.
 requires-python = ">=3.9"
 dependencies = [
-    "numpy",
-    "torch",
-    "SimpleITK",
-    "typing",
-    "gt-twixtools",
-    "scipy==1.13.1"
+    "numpy>=1.22",
+    "torch>=1.12",          # torch.fft, Tensor.H (vendored ggrappa)
+    "scipy>=1.7",           # imported by the vendored ggrappa
+    "tqdm>=4.60",           # progress bars of the vendored ggrappa
+    "SimpleITK>=2.1",
+    # Twix reader (import name `twixtools`, https://github.com/pehses/twixtools).
+    # Needs twix_array.kspace_center_col/lin/par; tested with 1.0.1.
+    "gt-twixtools>=1.0",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+examples = ["matplotlib>=3.5"]
+
+[project.urls]
+Source = "https://github.com/CyprienBouton/MRTwinReconstructCore"
+
+[tool.setuptools.dynamic]
+version = { attr = "MRTwinReconstructCoreLib.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["MRTwinReconstructCoreLib*"]
+
+[tool.setuptools.package-data]
+"MRTwinReconstructCoreLib.ggrappa" = ["LICENSE"]
+"MRTwinReconstructCoreLib.bart_python" = ["LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
